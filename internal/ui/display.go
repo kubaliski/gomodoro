@@ -9,6 +9,29 @@ import (
 	"time"
 )
 
+// Códigos de color ANSI
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+	ColorBold   = "\033[1m"
+
+	// Colores de fondo
+	BgRed    = "\033[41m"
+	BgGreen  = "\033[42m"
+	BgYellow = "\033[43m"
+	BgBlue   = "\033[44m"
+	BgPurple = "\033[45m"
+	BgCyan   = "\033[46m"
+)
+
+var isFirstDisplay = true
+
 // ClearScreen limpia la pantalla de la terminal
 func ClearScreen() {
 	var cmd *exec.Cmd
@@ -36,10 +59,10 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
-// GetProgressBar crea una barra de progreso simple
+// GetProgressBar crea una barra de progreso simple con colores
 func GetProgressBar(remaining, total time.Duration, width int) string {
 	if total <= 0 {
-		return strings.Repeat("█", width)
+		return ColorGreen + strings.Repeat("█", width) + ColorReset
 	}
 
 	progress := float64(total-remaining) / float64(total)
@@ -52,51 +75,110 @@ func GetProgressBar(remaining, total time.Duration, width int) string {
 		filled = 0
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	// Cambiar color según el progreso
+	var barColor string
+	if progress < 0.5 {
+		barColor = ColorRed
+	} else if progress < 0.8 {
+		barColor = ColorYellow
+	} else {
+		barColor = ColorGreen
+	}
+
+	bar := barColor + strings.Repeat("█", filled) + ColorReset +
+		ColorWhite + strings.Repeat("░", width-filled) + ColorReset
 	return bar
 }
 
-// DisplayTimer muestra el estado actual del timer
-func DisplayTimer(remaining time.Duration, state string) {
-	ClearScreen()
-
-	// Determinar duración total basada en el estado
-	var totalDuration time.Duration
+// GetStateColor retorna el color apropiado para cada estado
+func GetStateColor(state string) string {
 	switch state {
 	case "TRABAJO":
-		totalDuration = 25 * time.Minute
+		return ColorRed + ColorBold
 	case "DESCANSO":
-		totalDuration = 5 * time.Minute
+		return ColorGreen + ColorBold
 	case "DESCANSO LARGO":
-		totalDuration = 15 * time.Minute
+		return ColorBlue + ColorBold
 	default:
-		totalDuration = 25 * time.Minute
+		return ColorWhite + ColorBold
+	}
+}
+
+// DisplayTimer muestra el estado actual del timer (versión simple sin movimiento de cursor)
+func DisplayTimer(remaining time.Duration, state string, totalDuration ...time.Duration) {
+	// Determinar duración total
+	var total time.Duration
+	if len(totalDuration) > 0 {
+		total = totalDuration[0]
+	} else {
+		// Fallback a valores por defecto si no se proporciona
+		switch state {
+		case "TRABAJO":
+			total = 25 * time.Minute
+		case "DESCANSO":
+			total = 5 * time.Minute
+		case "DESCANSO LARGO":
+			total = 15 * time.Minute
+		default:
+			total = 25 * time.Minute
+		}
 	}
 
-	// ASCII Art Header
-	fmt.Println("+================================+")
-	fmt.Println("|          POMODORO CLI          |")
-	fmt.Println("+================================+")
-	fmt.Println("=====================================")
+	// Solo mostrar header la primera vez
+	if isFirstDisplay {
+		ClearScreen()
+		// ASCII Art Header simple con color
+		fmt.Print(ColorCyan + ColorBold)
+		fmt.Println("+================================+")
+		fmt.Println("|          POMODORO CLI          |")
+		fmt.Println("+================================+")
+		fmt.Print(ColorReset)
+		fmt.Println()
+		isFirstDisplay = false
+	}
 
-	// Estado y tiempo
-	fmt.Printf(">> Estado: %s\n", state)
-	fmt.Printf(">> Tiempo restante: %s\n", FormatDuration(remaining))
+	// Información dinámica en una sola línea que se sobrescribe
+	stateColor := GetStateColor(state)
+
+	// Tiempo restante con color dinámico
+	timeColor := ColorWhite
+	if remaining < 5*time.Minute {
+		timeColor = ColorRed + ColorBold
+	} else if remaining < 10*time.Minute {
+		timeColor = ColorYellow
+	}
 
 	// Barra de progreso
-	progressBar := GetProgressBar(remaining, totalDuration, 30)
-	fmt.Printf(">> Progreso: [%s]\n", progressBar)
+	progressBar := GetProgressBar(remaining, total, 20) // Más corta para una línea
 
 	// Porcentaje
-	progress := float64(totalDuration-remaining) / float64(totalDuration) * 100
+	progress := float64(total-remaining) / float64(total) * 100
 	if progress > 100 {
 		progress = 100
 	}
 	if progress < 0 {
 		progress = 0
 	}
-	fmt.Printf(">> Completado: %.1f%%\n", progress)
 
-	fmt.Println("=====================================")
-	fmt.Println(">> Presiona Ctrl+C para salir")
+	var percentColor string
+	if progress < 25 {
+		percentColor = ColorRed
+	} else if progress < 75 {
+		percentColor = ColorYellow
+	} else {
+		percentColor = ColorGreen
+	}
+
+	// Una sola línea que se actualiza con \r (carriage return)
+	fmt.Printf("\r%s%s%s | %s%s%s | [%s] %s%.1f%%%s | Ctrl+C para salir",
+		stateColor, state, ColorReset,
+		timeColor, FormatDuration(remaining), ColorReset,
+		progressBar,
+		percentColor, progress, ColorReset)
+}
+
+// ResetDisplay reinicia el estado del display (para usar entre sesiones)
+func ResetDisplay() {
+	isFirstDisplay = true
+	fmt.Println() // Nueva línea después del timer en línea
 }
