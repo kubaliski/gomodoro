@@ -71,6 +71,7 @@ type command struct {
 // EngineInterface define la interfaz pública del engine
 type EngineInterface interface {
 	Start(ctx context.Context) error
+	StartFirstSession() error
 	Stop() error
 	Pause() error
 	Resume() error
@@ -124,9 +125,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.isRunning = true
 	e.state = StateIdle
 	e.pomodoroCount = 0
+	e.currentSession = SessionWork // Iniciar en trabajo
 
-	// Iniciar goroutine principal
-	go e.run()
+	// Iniciar goroutine principal pero SIN empezar sesión automáticamente
+	go e.runEventLoop()
 
 	// Emitir evento de inicio
 	e.eventBus.Publish(events.EngineStarted, events.SessionEventData{
@@ -135,6 +137,24 @@ func (e *Engine) Start(ctx context.Context) error {
 		ConfigUsed: e.config,
 	})
 
+	return nil
+}
+
+// StartFirstSession inicia manualmente la primera sesión
+func (e *Engine) StartFirstSession() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.isRunning {
+		return fmt.Errorf("engine not running")
+	}
+
+	if e.currentTimer != nil {
+		return nil // Ya hay una sesión corriendo
+	}
+
+	// Iniciar primera sesión (trabajo)
+	go e.startNextSession()
 	return nil
 }
 
@@ -231,20 +251,17 @@ func (e *Engine) GetConfig() *config.Config {
 
 // Métodos privados
 
-// run es el bucle principal del engine
-func (e *Engine) run() {
+// runEventLoop es el bucle principal del engine
+func (e *Engine) runEventLoop() {
 	defer func() {
 		if r := recover(); r != nil {
 			e.eventBus.Publish(events.ErrorOccurred, events.ErrorEventData{
 				Message: fmt.Sprintf("Engine panic: %v", r),
 				Code:    "ENGINE_PANIC",
-				Source:  "engine.run",
+				Source:  "engine.runEventLoop",
 			})
 		}
 	}()
-
-	// Iniciar primera sesión
-	e.startNextSession()
 
 	// Ticker para actualizaciones del timer
 	ticker := time.NewTicker(1 * time.Second)
@@ -335,9 +352,9 @@ func (e *Engine) handleTick() {
 // startNextSession inicia la siguiente sesión
 func (e *Engine) startNextSession() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	if !e.isRunning {
+		e.mu.Unlock()
 		return
 	}
 
@@ -345,7 +362,11 @@ func (e *Engine) startNextSession() {
 	var duration time.Duration
 	var nextSessionType SessionType
 
-	if e.currentSession == SessionWork {
+	// Si es la primera sesión (no hay timer previo), empezar con trabajo
+	if e.currentTimer == nil {
+		nextSessionType = SessionWork
+		duration = e.config.WorkDuration
+	} else if e.currentSession == SessionWork {
 		// Trabajo completado, siguiente es descanso
 		e.pomodoroCount++
 		var isLong bool
@@ -368,6 +389,8 @@ func (e *Engine) startNextSession() {
 	// Crear nuevo timer
 	e.currentTimer = timer.NewTimer(duration)
 	e.currentTimer.Start()
+
+	e.mu.Unlock()
 
 	// Emitir eventos apropiados
 	e.emitSessionStartedEvent(nextSessionType, duration)
