@@ -1,0 +1,71 @@
+# Ejecutables de Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+pomodoro
+pomodoro.exe
+pomodoro-cli
+pomodoro-cli.exe
+
+# Archivos de test de Go
+*.test
+
+# Archivos de coverage
+*.out
+coverage.txt
+coverage.html
+
+# Archivos de dependencias
+vendor/
+
+# Archivos de Go modules (comentar si quieres incluir go.sum)
+# go.sum
+
+# Archivos del entorno de desarrollo
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos del sistema operativo
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archivos de log
+*.log
+
+# Archivos temporales
+tmp/
+temp/
+.tmp/
+
+# Archivos de configuración local (si los añades en el futuro)
+config.local.yaml
+config.local.json
+.env.local
+
+# Archivos de profiling
+*.prof
+cpu.prof
+mem.prof
+
+# Archivos de build
+build/
+dist/
+bin/
+
+# Archivos de backup
+*.bak
+*.backup
+
+# Archivos específicos del proyecto (si los necesitas)
+# pomodoro-stats.json
+# user-config.yaml

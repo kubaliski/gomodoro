@@ -14,17 +14,39 @@ import (
 
 // Session maneja una sesión completa de pomodoros
 type Session struct {
-	Config        *config.Config
-	PomodoroCount int
-	inputReader   *bufio.Reader
+	Config          *config.Config
+	PomodoroCount   int
+	inputReader     *bufio.Reader
+	globalInputChan chan string
 }
 
 // NewSession crea una nueva sesión
 func NewSession(cfg *config.Config) *Session {
-	return &Session{
-		Config:        cfg,
-		PomodoroCount: 0,
-		inputReader:   bufio.NewReader(os.Stdin),
+	session := &Session{
+		Config:          cfg,
+		PomodoroCount:   0,
+		inputReader:     bufio.NewReader(os.Stdin),
+		globalInputChan: make(chan string, 10),
+	}
+
+	// UNA SOLA goroutine global para todo el input
+	go session.startGlobalInputListener()
+
+	return session
+}
+
+// startGlobalInputListener es la ÚNICA goroutine que lee input
+func (s *Session) startGlobalInputListener() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if input != "" {
+			select {
+			case s.globalInputChan <- input:
+			default:
+				// Canal lleno, ignorar
+			}
+		}
 	}
 }
 
@@ -50,12 +72,16 @@ func (s *Session) Run() {
 
 		// Mostrar mensaje de completado
 		if result == TimerResultCompleted {
-			s.showWorkCompleted(breakType, breakDuration)
+			if !s.showWorkCompleted(breakType, breakDuration) {
+				return // Usuario salió
+			}
 		} else if result == TimerResultSkipped {
-			s.showWorkSkipped(breakType, breakDuration)
+			if !s.showWorkSkipped(breakType, breakDuration) {
+				return // Usuario salió
+			}
 		}
 
-		// Reiniciar el display para la siguiente sesión
+		// Reiniciar display
 		ui.ResetDisplay()
 
 		// Sesión de descanso
@@ -67,12 +93,16 @@ func (s *Session) Run() {
 
 		// Mostrar mensaje de descanso completado
 		if result == TimerResultCompleted {
-			s.showBreakCompleted(breakType)
+			if !s.showBreakCompleted(breakType) {
+				return // Usuario salió
+			}
 		} else if result == TimerResultSkipped {
-			s.showBreakSkipped(breakType)
+			if !s.showBreakSkipped(breakType) {
+				return // Usuario salió
+			}
 		}
 
-		// Reiniciar el display para la siguiente sesión
+		// Reiniciar display
 		ui.ResetDisplay()
 	}
 }
@@ -90,39 +120,15 @@ func (s *Session) runTimerWithControls(duration time.Duration, state string) Tim
 	pomodoroTimer := timer.NewTimer(duration)
 	pomodoroTimer.Start()
 
-	// Canal para comandos
-	commandChan := make(chan string, 10)
-
-	// Variable para controlar si el usuario está escribiendo
-	userTyping := false
-
-	// Goroutine para leer input
-	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			userTyping = true // Usuario terminó de escribir
-			input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			if input != "" {
-				select {
-				case commandChan <- input:
-				default:
-					// Canal lleno, ignorar
-				}
-			}
-			userTyping = false // Reset después de procesar
-		}
-	}()
-
 	// Ticker para actualizar cada segundo
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// Variable para control de display
-	lastUpdate := time.Now()
-
-	// Mostrar display inicial
+	// Display inicial
+	fmt.Print("\r\033[K") // Limpiar línea
 	ui.DisplayTimer(pomodoroTimer.Remaining, state, pomodoroTimer.GetStatus(), duration)
-	fmt.Print(" > ") // Prompt para comandos
+	fmt.Println() // Nueva línea para que los comandos aparezcan abajo
+	fmt.Print("Comando > ")
 
 	for pomodoroTimer.IsRunning && !pomodoroTimer.IsFinished() {
 		select {
@@ -130,18 +136,20 @@ func (s *Session) runTimerWithControls(duration time.Duration, state string) Tim
 			// Actualizar timer
 			pomodoroTimer.Tick()
 
-			// Solo actualizar display si el usuario NO está escribiendo
-			if !userTyping && time.Since(lastUpdate) >= 500*time.Millisecond {
-				// Limpiar línea completamente y redibujar
-				fmt.Print("\r\033[K")
-				ui.DisplayTimer(pomodoroTimer.Remaining, state, pomodoroTimer.GetStatus(), duration)
-				fmt.Print(" > ") // Prompt para comandos
-				lastUpdate = time.Now()
-			}
+			// Guardar posición actual del cursor
+			fmt.Print("\033[s") // Guardar cursor
 
-		case input := <-commandChan:
-			// Limpiar línea antes de mostrar feedback
-			fmt.Print("\r\033[K")
+			// Ir arriba y actualizar timer (sin tocar la línea de comando)
+			fmt.Print("\033[A")   // Subir una línea
+			fmt.Print("\r\033[K") // Limpiar línea del timer
+			ui.DisplayTimer(pomodoroTimer.Remaining, state, pomodoroTimer.GetStatus(), duration)
+
+			// Restaurar posición del cursor (línea de comandos)
+			fmt.Print("\033[u") // Restaurar cursor
+
+		case input := <-s.globalInputChan:
+			// Mostrar el comando que se escribió
+			fmt.Printf("%s\n", input)
 
 			// Procesar comando
 			switch input {
@@ -171,27 +179,34 @@ func (s *Session) runTimerWithControls(duration time.Duration, state string) Tim
 				return TimerResultQuit
 
 			case "h", "help":
-				s.showHelp()
+				s.showInlineHelp()
 
 			default:
 				fmt.Printf("❌ Comando '%s' no reconocido. Usa: p, r, s, q, h\n", input)
 			}
 
-			// Actualizar display después del comando
-			ui.DisplayTimer(pomodoroTimer.Remaining, state, pomodoroTimer.GetStatus(), duration)
-			fmt.Print(" > ") // Restaurar prompt
+			// Nuevo prompt para el siguiente comando
+			fmt.Print("Comando > ")
 
 		default:
-			// No bloquear si no hay comandos ni tick
+			// No bloquear
 		}
 
-		// Verificar si fue saltado
+		// Verificar si fue saltado o se quiere salir
 		if pomodoroTimer.IsSkipped {
 			return TimerResultSkipped
 		}
 	}
 
+	fmt.Println() // Nueva línea al terminar
 	return TimerResultCompleted
+}
+
+func (s *Session) showInlineHelp() {
+	fmt.Println()
+	fmt.Println("🎮 Controles: (p)ausar (r)eanudar (s)altar (q)salir")
+	fmt.Println("💡 Escribe el comando y presiona Enter")
+	fmt.Println()
 }
 
 func (s *Session) showConfiguration() {
@@ -206,8 +221,7 @@ func (s *Session) showConfiguration() {
 	fmt.Printf("   • Descanso largo: %s\n", ui.FormatDuration(s.Config.LongBreak))
 	fmt.Printf("   • Descanso largo cada: %d pomodoros\n", s.Config.LongBreakInterval)
 	fmt.Println()
-	fmt.Println("🎮 Controles interactivos:")
-	fmt.Println("   • (p) pausar  • (r) reanudar  • (s) saltar  • (q) salir  • (h) ayuda")
+	fmt.Println("🎮 Controles: (p)ausar (r)eanudar (s)altar (q)salir (h)ayuda")
 	fmt.Println("   • Escribe el comando y presiona Enter")
 	fmt.Println()
 	fmt.Println("🚀 Iniciando en 3 segundos...")
@@ -221,8 +235,7 @@ func (s *Session) getBreakInfo() (time.Duration, string) {
 	return s.Config.ShortBreak, "DESCANSO"
 }
 
-func (s *Session) showWorkCompleted(nextBreakType string, breakDuration time.Duration) {
-	fmt.Print("\r\033[K") // Limpiar línea actual
+func (s *Session) showWorkCompleted(nextBreakType string, breakDuration time.Duration) bool {
 	fmt.Println()
 	fmt.Println("+================================+")
 	fmt.Println("|       POMODORO COMPLETO!       |")
@@ -230,16 +243,12 @@ func (s *Session) showWorkCompleted(nextBreakType string, breakDuration time.Dur
 	fmt.Printf("✅ ¡Pomodoro #%d completado!\n", s.PomodoroCount)
 	fmt.Printf("🎯 Próximo: %s (%s)\n", nextBreakType, ui.FormatDuration(breakDuration))
 	fmt.Println()
-	fmt.Println("⏸️  Escribe 'c' + Enter para continuar con el descanso...")
-	fmt.Println("   o 'q' + Enter para salir")
-	fmt.Print(" > ")
+	fmt.Println("Escribe 'c' para continuar o 'q' para salir")
 
-	// Usar nuestro sistema de input unificado
-	s.waitForContinue()
+	return s.waitForInput([]string{"c", "continue"}, []string{"q", "quit"})
 }
 
-func (s *Session) showWorkSkipped(nextBreakType string, breakDuration time.Duration) {
-	fmt.Print("\r\033[K") // Limpiar línea actual
+func (s *Session) showWorkSkipped(nextBreakType string, breakDuration time.Duration) bool {
 	fmt.Println()
 	fmt.Println("+================================+")
 	fmt.Println("|      POMODORO SALTADO!         |")
@@ -247,15 +256,12 @@ func (s *Session) showWorkSkipped(nextBreakType string, breakDuration time.Durat
 	fmt.Printf("⏭️  Pomodoro #%d saltado\n", s.PomodoroCount)
 	fmt.Printf("🎯 Próximo: %s (%s)\n", nextBreakType, ui.FormatDuration(breakDuration))
 	fmt.Println()
-	fmt.Println("⏸️  Escribe 'c' + Enter para continuar con el descanso...")
-	fmt.Println("   o 'q' + Enter para salir")
-	fmt.Print(" > ")
+	fmt.Println("Escribe 'c' para continuar o 'q' para salir")
 
-	s.waitForContinue()
+	return s.waitForInput([]string{"c", "continue"}, []string{"q", "quit"})
 }
 
-func (s *Session) showBreakCompleted(breakType string) {
-	fmt.Print("\r\033[K") // Limpiar línea actual
+func (s *Session) showBreakCompleted(breakType string) bool {
 	fmt.Println()
 	fmt.Println("+================================+")
 	fmt.Println("|      DESCANSO COMPLETADO!      |")
@@ -263,15 +269,12 @@ func (s *Session) showBreakCompleted(breakType string) {
 	fmt.Printf("✅ %s terminado\n", breakType)
 	fmt.Println("💪 ¡Listo para el siguiente pomodoro!")
 	fmt.Println()
-	fmt.Println("⏸️  Escribe 'c' + Enter para continuar...")
-	fmt.Println("   o 'q' + Enter para salir")
-	fmt.Print(" > ")
+	fmt.Println("Escribe 'c' para continuar o 'q' para salir")
 
-	s.waitForContinue()
+	return s.waitForInput([]string{"c", "continue"}, []string{"q", "quit"})
 }
 
-func (s *Session) showBreakSkipped(breakType string) {
-	fmt.Print("\r\033[K") // Limpiar línea actual
+func (s *Session) showBreakSkipped(breakType string) bool {
 	fmt.Println()
 	fmt.Println("+================================+")
 	fmt.Println("|      DESCANSO SALTADO!         |")
@@ -279,51 +282,43 @@ func (s *Session) showBreakSkipped(breakType string) {
 	fmt.Printf("⏭️  %s saltado\n", breakType)
 	fmt.Println("💪 ¡Listo para el siguiente pomodoro!")
 	fmt.Println()
-	fmt.Println("⏸️  Escribe 'c' + Enter para continuar...")
-	fmt.Println("   o 'q' + Enter para salir")
-	fmt.Print(" > ")
+	fmt.Println("Escribe 'c' para continuar o 'q' para salir")
 
-	s.waitForContinue()
+	return s.waitForInput([]string{"c", "continue"}, []string{"q", "quit"})
 }
 
-// waitForContinue espera a que el usuario escriba 'c' para continuar
-func (s *Session) waitForContinue() {
-	scanner := bufio.NewScanner(os.Stdin)
+// waitForInput espera comandos específicos usando el canal global
+func (s *Session) waitForInput(continueCommands, quitCommands []string) bool {
+	fmt.Print("Comando > ")
+
 	for {
-		if scanner.Scan() {
-			input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			switch input {
-			case "c", "continue", "":
-				return // Continuar
-			case "q", "quit":
-				fmt.Println("👋 ¡Hasta luego! Buen trabajo.")
-				os.Exit(0)
-			default:
-				fmt.Printf("❌ Escribe 'c' para continuar o 'q' para salir > ")
+		select {
+		case input := <-s.globalInputChan:
+			// Mostrar el comando escrito
+			fmt.Printf("%s\n", input)
+
+			// Verificar comandos de continuar
+			for _, cmd := range continueCommands {
+				if input == cmd || input == "" {
+					return true // Continuar
+				}
 			}
+
+			// Verificar comandos de salir
+			for _, cmd := range quitCommands {
+				if input == cmd {
+					fmt.Println("👋 ¡Hasta luego! Buen trabajo.")
+					return false // Salir
+				}
+			}
+
+			// Comando no reconocido
+			fmt.Printf("❌ Escribe 'c' para continuar o 'q' para salir\n")
+			fmt.Print("Comando > ")
+
+		default:
+			// No bloquear
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
-}
-
-func (s *Session) showHelp() {
-	// No usar fmt.Scanln() que interrumpe nuestra goroutine
-	fmt.Print("\r\033[K") // Limpiar línea actual
-	fmt.Println()
-	fmt.Println("+================================+")
-	fmt.Println("|            AYUDA               |")
-	fmt.Println("+================================+")
-	fmt.Println()
-	fmt.Println("🎮 Controles disponibles:")
-	fmt.Println("   p, pause    - Pausar el timer actual")
-	fmt.Println("   r, resume   - Reanudar el timer pausado")
-	fmt.Println("   s, skip     - Saltar al siguiente período")
-	fmt.Println("   q, quit     - Salir del programa")
-	fmt.Println("   h, help     - Mostrar esta ayuda")
-	fmt.Println()
-	fmt.Println("💡 Consejos:")
-	fmt.Println("   • Escribe el comando y presiona Enter")
-	fmt.Println("   • El timer continúa corriendo mientras escribes")
-	fmt.Println()
-	fmt.Println("✅ Continúa escribiendo comandos...")
-	fmt.Println()
 }
