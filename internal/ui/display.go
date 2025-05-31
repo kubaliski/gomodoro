@@ -9,29 +9,11 @@ import (
 	"time"
 )
 
-// Códigos de color ANSI
-const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorBlue   = "\033[34m"
-	ColorPurple = "\033[35m"
-	ColorCyan   = "\033[36m"
-	ColorWhite  = "\033[37m"
-	ColorBold   = "\033[1m"
-
-	// Colores de fondo
-	BgRed    = "\033[41m"
-	BgGreen  = "\033[42m"
-	BgYellow = "\033[43m"
-	BgBlue   = "\033[44m"
-	BgPurple = "\033[45m"
-	BgCyan   = "\033[46m"
+// Variables de estado del display
+var (
+	headerShown        = false
+	lastDisplayContent = ""
 )
-
-var headerShown = false
-var lastDisplayContent = ""
 
 // ClearScreen limpia la pantalla de la terminal
 func ClearScreen() {
@@ -60,10 +42,10 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
-// GetProgressBar crea una barra de progreso simple con colores
+// GetProgressBar crea una barra de progreso simple con colores usando el nuevo sistema
 func GetProgressBar(remaining, total time.Duration, width int) string {
 	if total <= 0 {
-		return ColorGreen + strings.Repeat("█", width) + ColorReset
+		return Colorize(strings.Repeat("█", width), ColorGreen, true)
 	}
 
 	progress := float64(total-remaining) / float64(total)
@@ -76,8 +58,8 @@ func GetProgressBar(remaining, total time.Duration, width int) string {
 		filled = 0
 	}
 
-	// Cambiar color según el progreso
-	var barColor string
+	// Cambiar color según el progreso usando el nuevo sistema
+	var barColor Color
 	if progress < 0.5 {
 		barColor = ColorRed
 	} else if progress < 0.8 {
@@ -86,26 +68,12 @@ func GetProgressBar(remaining, total time.Duration, width int) string {
 		barColor = ColorGreen
 	}
 
-	bar := barColor + strings.Repeat("█", filled) + ColorReset +
-		ColorWhite + strings.Repeat("░", width-filled) + ColorReset
+	bar := Colorize(strings.Repeat("█", filled), barColor, true) +
+		Colorize(strings.Repeat("░", width-filled), ColorWhite, true)
 	return bar
 }
 
-// GetStateColor retorna el color apropiado para cada estado
-func GetStateColor(state string) string {
-	switch state {
-	case "TRABAJO":
-		return ColorRed + ColorBold
-	case "DESCANSO":
-		return ColorGreen + ColorBold
-	case "DESCANSO LARGO":
-		return ColorBlue + ColorBold
-	default:
-		return ColorWhite + ColorBold
-	}
-}
-
-// DisplayTimer muestra el estado actual del timer (versión anti-parpadeo)
+// DisplayTimer muestra el estado actual del timer (versión anti-parpadeo mejorada)
 func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 	var timerStatus string
 	var totalDuration time.Duration
@@ -115,7 +83,7 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 		if status, ok := args[0].(string); ok {
 			timerStatus = status
 		} else {
-			timerStatus = "CORRIENDO"
+			timerStatus = "RUNNING"
 		}
 
 		if duration, ok := args[1].(time.Duration); ok {
@@ -124,14 +92,14 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 			totalDuration = 25 * time.Minute
 		}
 	} else if len(args) == 1 {
-		timerStatus = "CORRIENDO"
+		timerStatus = "RUNNING"
 		if duration, ok := args[0].(time.Duration); ok {
 			totalDuration = duration
 		} else {
 			totalDuration = 25 * time.Minute
 		}
 	} else {
-		timerStatus = "CORRIENDO"
+		timerStatus = "RUNNING"
 		switch state {
 		case "TRABAJO":
 			totalDuration = 25 * time.Minute
@@ -147,36 +115,37 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 	// Mostrar header una sola vez
 	if !headerShown {
 		ClearScreen()
-		fmt.Print(ColorCyan + ColorBold)
-		fmt.Println("+================================+")
-		fmt.Println("|          POMODORO CLI          |")
-		fmt.Println("+================================+")
-		fmt.Print(ColorReset)
+		fmt.Print(Colorize("+================================+", ColorCyan, true))
+		fmt.Println()
+		fmt.Print(Colorize("|          POMODORO CLI          |", ColorCyan, true))
+		fmt.Println()
+		fmt.Print(Colorize("+================================+", ColorCyan, true))
+		fmt.Println()
 		fmt.Println()
 		fmt.Println("Escribe comandos: (p)ausar (r)eanudar (s)altar (q)salir (h)ayuda")
 		fmt.Println()
 		headerShown = true
 	}
 
-	// Calcular información para mostrar
-	stateColor := GetStateColor(state)
+	// Calcular información para mostrar usando el nuevo sistema de colores
+	stateColor := GetTimerStateColor(state)
 
-	var statusColor string
-	switch timerStatus {
-	case "PAUSADO":
-		statusColor = ColorYellow + ColorBold
-	case "CORRIENDO":
+	var statusColor Color
+	switch strings.ToUpper(timerStatus) {
+	case "PAUSED", "PAUSADO":
+		statusColor = ColorYellow
+	case "RUNNING", "CORRIENDO":
 		statusColor = ColorGreen
-	case "DETENIDO":
+	case "STOPPED", "DETENIDO":
 		statusColor = ColorRed
 	default:
 		statusColor = ColorWhite
 	}
 
 	timeColor := ColorWhite
-	if remaining < 5*time.Minute && timerStatus == "CORRIENDO" {
-		timeColor = ColorRed + ColorBold
-	} else if remaining < 10*time.Minute && timerStatus == "CORRIENDO" {
+	if remaining < 5*time.Minute && strings.ToUpper(timerStatus) == "RUNNING" {
+		timeColor = ColorRed
+	} else if remaining < 10*time.Minute && strings.ToUpper(timerStatus) == "RUNNING" {
 		timeColor = ColorYellow
 	}
 
@@ -190,7 +159,7 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 		progress = 0
 	}
 
-	var percentColor string
+	var percentColor Color
 	if progress < 25 {
 		percentColor = ColorRed
 	} else if progress < 75 {
@@ -199,13 +168,13 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 		percentColor = ColorGreen
 	}
 
-	// Construir el contenido completo
-	content := fmt.Sprintf("%s%s%s | %s%s%s | %s%s%s | [%s] %s%.1f%%%s",
-		stateColor, state, ColorReset,
-		statusColor, timerStatus, ColorReset,
-		timeColor, FormatDuration(remaining), ColorReset,
+	// Construir el contenido completo usando el nuevo sistema
+	content := fmt.Sprintf("%s | %s | %s | [%s] %s",
+		Colorize(state, stateColor, true),
+		Colorize(timerStatus, statusColor, true),
+		Colorize(FormatDuration(remaining), timeColor, true),
 		progressBar,
-		percentColor, progress, ColorReset)
+		Colorize(fmt.Sprintf("%.1f%%", progress), percentColor, true))
 
 	// Solo actualizar si hay cambios significativos (evitar parpadeo)
 	if content != lastDisplayContent {
@@ -228,4 +197,70 @@ func ResetDisplay() {
 	headerShown = false
 	lastDisplayContent = ""
 	fmt.Println() // Nueva línea para separar sesiones
+}
+
+// ShowHeader muestra el header principal del CLI
+func ShowHeader(title string) {
+	ClearScreen()
+	fmt.Println(Colorize("╔══════════════════════════════════════════════════════════════╗", ColorCyan, true))
+	fmt.Printf(Colorize("║%s║", ColorCyan, true)+"\n", centerText(title, 62))
+	fmt.Println(Colorize("╚══════════════════════════════════════════════════════════════╝", ColorCyan, true))
+	fmt.Println()
+}
+
+// centerText centra texto dentro de un ancho específico
+func centerText(text string, width int) string {
+	if len(text) >= width {
+		return text[:width-3] + "..."
+	}
+
+	padding := width - len(text)
+	leftPad := padding / 2
+	rightPad := padding - leftPad
+
+	return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+}
+
+// ShowSection muestra una sección con título
+func ShowSection(title string, color Color) {
+	fmt.Println(Colorize(title, color, true))
+	fmt.Println(Colorize(strings.Repeat("─", len(title)), ColorGray, true))
+}
+
+// ShowSeparator muestra una línea separadora
+func ShowSeparator(width int) {
+	fmt.Println(Colorize(strings.Repeat("─", width), ColorGray, true))
+}
+
+// ShowBox muestra texto en una caja
+func ShowBox(title, content string, color Color) {
+	lines := strings.Split(content, "\n")
+	maxWidth := len(title)
+
+	for _, line := range lines {
+		if len(line) > maxWidth {
+			maxWidth = len(line)
+		}
+	}
+
+	boxWidth := maxWidth + 4
+
+	// Top border
+	fmt.Println(Colorize("┌"+strings.Repeat("─", boxWidth-2)+"┐", color, true))
+
+	// Title
+	fmt.Printf(Colorize("│ %s%s │", color, true)+"\n",
+		title, strings.Repeat(" ", boxWidth-4-len(title)))
+
+	// Separator
+	fmt.Println(Colorize("├"+strings.Repeat("─", boxWidth-2)+"┤", color, true))
+
+	// Content
+	for _, line := range lines {
+		fmt.Printf(Colorize("│ %s%s │", color, true)+"\n",
+			line, strings.Repeat(" ", boxWidth-4-len(line)))
+	}
+
+	// Bottom border
+	fmt.Println(Colorize("└"+strings.Repeat("─", boxWidth-2)+"┘", color, true))
 }
