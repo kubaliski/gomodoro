@@ -1,6 +1,6 @@
 # Pomodoro CLI
 
-Un temporizador Pomodoro simple para la línea de comandos, escrito en Go.
+Un temporizador Pomodoro simple para la línea de comandos, escrito en Go. Proyecto para trabajar con las Goroutines y aprender
 
 ## Instalación
 

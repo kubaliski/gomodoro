@@ -30,7 +30,8 @@ const (
 	BgCyan   = "\033[46m"
 )
 
-var isFirstDisplay = true
+var headerShown = false
+var lastDisplayContent = ""
 
 // ClearScreen limpia la pantalla de la terminal
 func ClearScreen() {
@@ -104,55 +105,84 @@ func GetStateColor(state string) string {
 	}
 }
 
-// DisplayTimer muestra el estado actual del timer (versión simple sin movimiento de cursor)
-func DisplayTimer(remaining time.Duration, state string, totalDuration ...time.Duration) {
-	// Determinar duración total
-	var total time.Duration
-	if len(totalDuration) > 0 {
-		total = totalDuration[0]
+// DisplayTimer muestra el estado actual del timer (versión anti-parpadeo)
+func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
+	var timerStatus string
+	var totalDuration time.Duration
+
+	// Procesar argumentos variables para máxima compatibilidad
+	if len(args) == 2 {
+		if status, ok := args[0].(string); ok {
+			timerStatus = status
+		} else {
+			timerStatus = "CORRIENDO"
+		}
+
+		if duration, ok := args[1].(time.Duration); ok {
+			totalDuration = duration
+		} else {
+			totalDuration = 25 * time.Minute
+		}
+	} else if len(args) == 1 {
+		timerStatus = "CORRIENDO"
+		if duration, ok := args[0].(time.Duration); ok {
+			totalDuration = duration
+		} else {
+			totalDuration = 25 * time.Minute
+		}
 	} else {
-		// Fallback a valores por defecto si no se proporciona
+		timerStatus = "CORRIENDO"
 		switch state {
 		case "TRABAJO":
-			total = 25 * time.Minute
+			totalDuration = 25 * time.Minute
 		case "DESCANSO":
-			total = 5 * time.Minute
+			totalDuration = 5 * time.Minute
 		case "DESCANSO LARGO":
-			total = 15 * time.Minute
+			totalDuration = 15 * time.Minute
 		default:
-			total = 25 * time.Minute
+			totalDuration = 25 * time.Minute
 		}
 	}
 
-	// Solo mostrar header la primera vez
-	if isFirstDisplay {
+	// Mostrar header una sola vez
+	if !headerShown {
 		ClearScreen()
-		// ASCII Art Header simple con color
 		fmt.Print(ColorCyan + ColorBold)
 		fmt.Println("+================================+")
 		fmt.Println("|          POMODORO CLI          |")
 		fmt.Println("+================================+")
 		fmt.Print(ColorReset)
 		fmt.Println()
-		isFirstDisplay = false
+		fmt.Println("Escribe comandos: (p)ausar (r)eanudar (s)altar (q)salir (h)ayuda")
+		fmt.Println()
+		headerShown = true
 	}
 
-	// Información dinámica en una sola línea que se sobrescribe
+	// Calcular información para mostrar
 	stateColor := GetStateColor(state)
 
-	// Tiempo restante con color dinámico
+	var statusColor string
+	switch timerStatus {
+	case "PAUSADO":
+		statusColor = ColorYellow + ColorBold
+	case "CORRIENDO":
+		statusColor = ColorGreen
+	case "DETENIDO":
+		statusColor = ColorRed
+	default:
+		statusColor = ColorWhite
+	}
+
 	timeColor := ColorWhite
-	if remaining < 5*time.Minute {
+	if remaining < 5*time.Minute && timerStatus == "CORRIENDO" {
 		timeColor = ColorRed + ColorBold
-	} else if remaining < 10*time.Minute {
+	} else if remaining < 10*time.Minute && timerStatus == "CORRIENDO" {
 		timeColor = ColorYellow
 	}
 
-	// Barra de progreso
-	progressBar := GetProgressBar(remaining, total, 20) // Más corta para una línea
+	progressBar := GetProgressBar(remaining, totalDuration, 20)
 
-	// Porcentaje
-	progress := float64(total-remaining) / float64(total) * 100
+	progress := float64(totalDuration-remaining) / float64(totalDuration) * 100
 	if progress > 100 {
 		progress = 100
 	}
@@ -169,16 +199,33 @@ func DisplayTimer(remaining time.Duration, state string, totalDuration ...time.D
 		percentColor = ColorGreen
 	}
 
-	// Una sola línea que se actualiza con \r (carriage return)
-	fmt.Printf("\r%s%s%s | %s%s%s | [%s] %s%.1f%%%s | Ctrl+C para salir",
+	// Construir el contenido completo
+	content := fmt.Sprintf("%s%s%s | %s%s%s | %s%s%s | [%s] %s%.1f%%%s",
 		stateColor, state, ColorReset,
+		statusColor, timerStatus, ColorReset,
 		timeColor, FormatDuration(remaining), ColorReset,
 		progressBar,
 		percentColor, progress, ColorReset)
+
+	// Solo actualizar si hay cambios significativos (evitar parpadeo)
+	if content != lastDisplayContent {
+		fmt.Print(content)
+		lastDisplayContent = content
+	} else {
+		// Si no hay cambios, solo imprimir el contenido sin limpiar
+		fmt.Print(content)
+	}
+}
+
+// DisplayTimerWithPrompt muestra el timer con un prompt para comandos
+func DisplayTimerWithPrompt(remaining time.Duration, state string, args ...interface{}) {
+	DisplayTimer(remaining, state, args...)
+	fmt.Print(" > ")
 }
 
 // ResetDisplay reinicia el estado del display (para usar entre sesiones)
 func ResetDisplay() {
-	isFirstDisplay = true
-	fmt.Println() // Nueva línea después del timer en línea
+	headerShown = false
+	lastDisplayContent = ""
+	fmt.Println() // Nueva línea para separar sesiones
 }
