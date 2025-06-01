@@ -88,6 +88,83 @@ func (b *Bot) setupHandlers() {
 	b.sessionManager.RegisterEventHandler("timer_reminder", b.handleTimerReminder)
 }
 
+// getOrCreateDMChannel obtiene o crea un canal DM para un usuario
+func (b *Bot) getOrCreateDMChannel(userID string) (string, error) {
+	channel, err := b.session.UserChannelCreate(userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create DM channel for user %s: %w", userID, err)
+	}
+	return channel.ID, nil
+}
+
+// sendNotificationWithFallback envía notificación a DM primero, fallback a canal
+func (b *Bot) sendNotificationWithFallback(userID, channelID string, embed *discordgo.MessageEmbed, mention string) error {
+	// Verificar si hay sesión activa
+	_, err := b.sessionManager.GetSession(userID)
+	if err != nil {
+		// Si no hay sesión activa, usar canal original
+		return b.sendToChannel(channelID, embed, mention)
+	}
+
+	// Por ahora solo implementamos modo DM con fallback
+	// En Fase 2 usaremos session.NotificationMode para diferentes modos
+	return b.sendToDM(userID, channelID, embed, mention)
+}
+
+// sendToDM intenta enviar a DM, con fallback a canal
+func (b *Bot) sendToDM(userID, channelID string, embed *discordgo.MessageEmbed, mention string) error {
+	// 1. Intentar obtener/crear canal DM
+	dmChannelID, err := b.getOrCreateDMChannel(userID)
+	if err != nil {
+		log.Printf("⚠️ Failed to create DM channel for user %s: %v. Using fallback.", userID, err)
+		return b.sendToChannel(channelID, embed, mention)
+	}
+
+	// 2. Actualizar cache de DM en sesión
+	if err := b.sessionManager.UpdateSessionDMChannel(userID, dmChannelID); err != nil {
+		log.Printf("⚠️ Failed to update DM channel cache: %v", err)
+	}
+
+	// 3. Intentar enviar embed a DM
+	_, err = b.session.ChannelMessageSendEmbed(dmChannelID, embed)
+	if err != nil {
+		log.Printf("⚠️ Failed to send DM embed to user %s: %v. Using fallback.", userID, err)
+		return b.sendToChannel(channelID, embed, mention)
+	}
+
+	// 4. Enviar mention por separado si es necesario
+	if mention != "" {
+		_, err = b.session.ChannelMessageSend(dmChannelID, mention)
+		if err != nil {
+			log.Printf("⚠️ Failed to send DM mention to user %s: %v", userID, err)
+			// No hacemos fallback para mention, solo log
+		}
+	}
+
+	log.Printf("✅ DM notification sent successfully to user %s", userID)
+	return nil
+}
+
+// sendToChannel envía notificación al canal público
+func (b *Bot) sendToChannel(channelID string, embed *discordgo.MessageEmbed, mention string) error {
+	// Enviar embed
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		return fmt.Errorf("failed to send embed to channel %s: %w", channelID, err)
+	}
+
+	// Enviar mention si es necesario
+	if mention != "" {
+		_, err = b.session.ChannelMessageSend(channelID, mention)
+		if err != nil {
+			log.Printf("⚠️ Failed to send mention to channel %s: %v", channelID, err)
+		}
+	}
+
+	log.Printf("📢 Channel notification sent successfully to channel %s", channelID)
+	return nil
+}
+
 // registerSlashCommands registra los comandos slash del bot
 func (b *Bot) registerSlashCommands() error {
 	commands := []*discordgo.ApplicationCommand{
@@ -177,9 +254,26 @@ func (b *Bot) handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionC
 	}
 }
 
+// getUserID obtiene el ID del usuario de forma segura (funciona en canal y DM)
+func (b *Bot) getUserID(i *discordgo.InteractionCreate) (string, error) {
+	if i.Member != nil {
+		// Comando ejecutado en servidor
+		return i.Member.User.ID, nil
+	} else if i.User != nil {
+		// Comando ejecutado en DM
+		return i.User.ID, nil
+	}
+	return "", fmt.Errorf("no se pudo identificar el usuario")
+}
+
 // handleStartPomodoro maneja el comando de iniciar pomodoro
 func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
+
 	channelID := i.ChannelID
 
 	// Parsear opciones personalizadas
@@ -212,7 +306,7 @@ func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.Interaction
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🍅 ¡Pomodoro Iniciado!",
-		Description: fmt.Sprintf("Tu sesión de pomodoro ha comenzado con períodos de trabajo de %s.", config.FormatDuration(session.Config.WorkDuration)),
+		Description: fmt.Sprintf("Tu sesión de pomodoro ha comenzado con períodos de trabajo de %s.\n\n📱 *Las notificaciones se enviarán a tus mensajes privados*", config.FormatDuration(session.Config.WorkDuration)),
 		Color:       0x00ff00,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Duración de Trabajo", Value: config.FormatDuration(session.Config.WorkDuration), Inline: true},
@@ -220,6 +314,9 @@ func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.Interaction
 			{Name: "Descanso Largo", Value: config.FormatDuration(session.Config.LongBreak), Inline: true},
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Asegúrate de tener los DMs habilitados para recibir notificaciones",
+		},
 	}
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -236,7 +333,11 @@ func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.Interaction
 
 // handleStopPomodoro maneja el comando de detener pomodoro
 func (b *Bot) handleStopPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.StopSession(userID); err != nil {
 		b.respondWithError(s, i, fmt.Sprintf("Error al detener el pomodoro: %v", err))
@@ -258,7 +359,7 @@ func (b *Bot) handleStopPomodoro(s *discordgo.Session, i *discordgo.InteractionC
 	})
 }
 
-// Event handlers para notificaciones de pomodoro
+// Event handlers para notificaciones de pomodoro (ACTUALIZADOS PARA DM)
 
 func (b *Bot) handlePomodoroCompleted(userID, channelID string, event events.Event) {
 	data, ok := event.Data.(events.PomodoroEventData)
@@ -278,17 +379,10 @@ func (b *Bot) handlePomodoroCompleted(userID, channelID string, event events.Eve
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
-		log.Printf("Error sending pomodoro completed notification: %v", err)
-		return
-	}
+	mention := "¡Hora de un descanso! 🧘‍♂️"
 
-	// Mention user
-	mentionMsg := fmt.Sprintf("<@%s> ¡Hora de un descanso! 🧘‍♂️", userID)
-	_, err = b.session.ChannelMessageSend(channelID, mentionMsg)
-	if err != nil {
-		log.Printf("Error sending mention message: %v", err)
+	if err := b.sendNotificationWithFallback(userID, channelID, embed, mention); err != nil {
+		log.Printf("Error sending pomodoro completed notification: %v", err)
 	}
 }
 
@@ -313,8 +407,7 @@ func (b *Bot) handleBreakStarted(userID, channelID string, event events.Event) {
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
-	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
+	if err := b.sendNotificationWithFallback(userID, channelID, embed, ""); err != nil {
 		log.Printf("Error sending break started notification: %v", err)
 	}
 }
@@ -337,8 +430,7 @@ func (b *Bot) handlePomodoroStarted(userID, channelID string, event events.Event
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
+	if err := b.sendNotificationWithFallback(userID, channelID, embed, ""); err != nil {
 		log.Printf("Error sending pomodoro started notification: %v", err)
 	}
 }
@@ -361,16 +453,10 @@ func (b *Bot) handleBreakCompleted(userID, channelID string, event events.Event)
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
-		log.Printf("Error sending break completed notification: %v", err)
-		return
-	}
+	mention := "¡De vuelta al trabajo! 💪"
 
-	mentionMsg := fmt.Sprintf("<@%s> ¡De vuelta al trabajo! 💪", userID)
-	_, err = b.session.ChannelMessageSend(channelID, mentionMsg)
-	if err != nil {
-		log.Printf("Error sending back to work message: %v", err)
+	if err := b.sendNotificationWithFallback(userID, channelID, embed, mention); err != nil {
+		log.Printf("Error sending break completed notification: %v", err)
 	}
 }
 
@@ -406,8 +492,7 @@ func (b *Bot) handleTimerReminder(userID, channelID string, event events.Event) 
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
-	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
+	if err := b.sendNotificationWithFallback(userID, channelID, embed, ""); err != nil {
 		log.Printf("Error sending timer reminder: %v", err)
 	}
 }

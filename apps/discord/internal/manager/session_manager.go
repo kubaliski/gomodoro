@@ -14,12 +14,14 @@ import (
 
 // UserSession representa una sesión de pomodoro para un usuario específico
 type UserSession struct {
-	UserID    string
-	ChannelID string
-	Engine    engine.EngineInterface
-	Config    *config.Config
-	StartTime time.Time
-	Active    bool
+	UserID           string
+	ChannelID        string // Canal donde se ejecutó el comando
+	DMChannelID      string // Canal DM del usuario (cache)
+	Engine           engine.EngineInterface
+	Config           *config.Config
+	StartTime        time.Time
+	Active           bool
+	NotificationMode string // "dm", "channel", "both" (default: "dm")
 }
 
 // SessionManager maneja múltiples sesiones de usuarios
@@ -63,14 +65,16 @@ func (sm *SessionManager) StartSession(userID, channelID string, customConfig *c
 	// Crear nueva engine
 	pomodoroEngine := engine.NewEngine(cfg.Clone())
 
-	// Crear sesión
+	// Crear sesión con modo DM por defecto
 	session := &UserSession{
-		UserID:    userID,
-		ChannelID: channelID,
-		Engine:    pomodoroEngine,
-		Config:    cfg.Clone(),
-		StartTime: time.Now(),
-		Active:    true,
+		UserID:           userID,
+		ChannelID:        channelID,
+		DMChannelID:      "", // Se establecerá cuando sea necesario
+		Engine:           pomodoroEngine,
+		Config:           cfg.Clone(),
+		StartTime:        time.Now(),
+		Active:           true,
+		NotificationMode: "dm", // Valor por defecto
 	}
 
 	// Configurar event handlers para esta sesión ANTES de iniciar el engine
@@ -127,6 +131,41 @@ func (sm *SessionManager) GetSession(userID string) (*UserSession, error) {
 	}
 
 	return session, nil
+}
+
+// UpdateSessionDMChannel actualiza el canal DM de una sesión
+func (sm *SessionManager) UpdateSessionDMChannel(userID, dmChannelID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, exists := sm.sessions[userID]
+	if !exists || !session.Active {
+		return fmt.Errorf("no active session found for user")
+	}
+
+	session.DMChannelID = dmChannelID
+	log.Printf("📱 Updated DM channel for user %s: %s", userID, dmChannelID)
+	return nil
+}
+
+// UpdateSessionNotificationMode actualiza el modo de notificación de una sesión
+func (sm *SessionManager) UpdateSessionNotificationMode(userID, mode string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, exists := sm.sessions[userID]
+	if !exists || !session.Active {
+		return fmt.Errorf("no active session found for user")
+	}
+
+	// Validar modo
+	if mode != "dm" && mode != "channel" && mode != "both" {
+		return fmt.Errorf("invalid notification mode: %s", mode)
+	}
+
+	session.NotificationMode = mode
+	log.Printf("🔔 Updated notification mode for user %s: %s", userID, mode)
+	return nil
 }
 
 // GetAllActiveSessions retorna todas las sesiones activas

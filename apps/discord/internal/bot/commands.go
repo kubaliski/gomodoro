@@ -11,7 +11,11 @@ import (
 
 // handlePausePomodoro maneja el comando de pausar pomodoro
 func (b *Bot) handlePausePomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.PauseSession(userID); err != nil {
 		b.respondWithError(s, i, fmt.Sprintf("Error al pausar el pomodoro: %v", err))
@@ -35,7 +39,11 @@ func (b *Bot) handlePausePomodoro(s *discordgo.Session, i *discordgo.Interaction
 
 // handleResumePomodoro maneja el comando de reanudar pomodoro
 func (b *Bot) handleResumePomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.ResumeSession(userID); err != nil {
 		b.respondWithError(s, i, fmt.Sprintf("Error al reanudar el pomodoro: %v", err))
@@ -59,7 +67,11 @@ func (b *Bot) handleResumePomodoro(s *discordgo.Session, i *discordgo.Interactio
 
 // handleSkipPomodoro maneja el comando de saltar sesión
 func (b *Bot) handleSkipPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.SkipSession(userID); err != nil {
 		b.respondWithError(s, i, fmt.Sprintf("Error al saltar la sesión: %v", err))
@@ -83,7 +95,11 @@ func (b *Bot) handleSkipPomodoro(s *discordgo.Session, i *discordgo.InteractionC
 
 // handleStatusPomodoro maneja el comando de estado
 func (b *Bot) handleStatusPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	session, err := b.sessionManager.GetSession(userID)
 	if err != nil {
@@ -155,7 +171,11 @@ func (b *Bot) handleStatusPomodoro(s *discordgo.Session, i *discordgo.Interactio
 
 // handleStatsPomodoro maneja el comando de estadísticas
 func (b *Bot) handleStatsPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := b.getUserID(i)
+	if err != nil {
+		b.respondWithError(s, i, err.Error())
+		return
+	}
 
 	session, err := b.sessionManager.GetSession(userID)
 	if err != nil {
