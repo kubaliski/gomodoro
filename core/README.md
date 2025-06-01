@@ -1,18 +1,18 @@
 # 🍅 Pomodoro Core
 
-A robust, thread-safe, and UI-agnostic Pomodoro timer engine written in Go. This core library provides all the essential functionality for implementing the Pomodoro Technique in any type of application (CLI, web, desktop, mobile, etc.).
+Motor robusto, thread-safe y UI-agnóstico para temporizadores Pomodoro escrito en Go. Esta biblioteca central proporciona toda la funcionalidad esencial para implementar la Técnica Pomodoro en cualquier tipo de aplicación (CLI, web, escritorio, móvil, etc.).
 
-## ✨ Features
+## ✨ Características
 
-- **🔒 Thread-safe**: All operations are safe for concurrent use
-- **🎯 UI-agnostic**: No UI dependencies, works with any interface
-- **📊 Comprehensive stats**: Detailed session tracking and analytics
-- **🔔 Event-driven**: Reactive architecture with pub-sub events
-- **⚙️ Configurable**: Flexible configuration with validation
-- **🧪 Testable**: Clean interfaces and dependency injection
-- **📦 Zero dependencies**: Pure Go implementation
+- **🔒 Thread-safe**: Todas las operaciones son seguras para uso concurrente
+- **🎯 UI-agnóstico**: Sin dependencias de UI, funciona con cualquier interfaz
+- **📊 Estadísticas completas**: Seguimiento detallado de sesiones y análisis
+- **🔔 Basado en eventos**: Arquitectura reactiva con eventos pub-sub
+- **⚙️ Configurable**: Configuración flexible con validación
+- **🧪 Testeable**: Interfaces limpias e inyección de dependencias
+- **📦 Sin dependencias**: Implementación pura en Go
 
-## 🚀 Quick Start
+## 🚀 Inicio Rápido
 
 ```go
 package main
@@ -28,32 +28,33 @@ import (
 )
 
 func main() {
-    // Create configuration
+    // Crear configuración
     cfg := config.DefaultConfig()
 
-    // Create engine
+    // Crear motor
     pomodoroEngine := engine.NewEngine(cfg)
 
-    // Subscribe to events
+    // Suscribirse a eventos
     eventBus := pomodoroEngine.GetEventBus()
     eventBus.SubscribeFunc(events.PomodoroCompleted, func(event events.Event) {
         if data, ok := event.Data.(events.PomodoroEventData); ok {
-            fmt.Printf("🍅 Pomodoro #%d completed!\n", data.Number)
+            fmt.Printf("🍅 ¡Pomodoro #%d completado!\n", data.Number)
         }
     })
 
-    // Start the engine
+    // Iniciar el motor
     ctx := context.Background()
     pomodoroEngine.Start(ctx)
+    pomodoroEngine.StartFirstSession()
 
-    // Engine runs in background, handling timers and emitting events
-    // Your UI layer subscribes to events and sends commands
+    // El motor funciona en segundo plano, manejando timers y emitiendo eventos
+    // Tu capa de UI se suscribe a eventos y envía comandos
 }
 ```
 
-## 📋 Core Concepts
+## 📋 Conceptos Centrales
 
-### Configuration
+### Configuración
 
 ```go
 cfg := &config.Config{
@@ -63,58 +64,59 @@ cfg := &config.Config{
     LongBreakInterval: 4,
 }
 
-// Validate configuration
+// Validar configuración
 if err := cfg.Validate(); err != nil {
     log.Fatal(err)
 }
 ```
 
-### Engine Control
+### Control del Motor
 
 ```go
-// Start the engine
+// Iniciar el motor
 err := engine.Start(context.Background())
 
-// Control timer
+// Controlar timer
 engine.Pause()
 engine.Resume()
 engine.Skip()
 
-// Stop engine
+// Detener motor
 engine.Stop()
 ```
 
-### Event System
+### Sistema de Eventos
 
 ```go
 eventBus := engine.GetEventBus()
 
-// Subscribe to specific events
-eventBus.SubscribeFunc(events.TimerTick, handleTimerTick)
-eventBus.SubscribeFunc(events.PomodoroCompleted, handlePomodoroCompleted)
+// Suscribirse a eventos específicos
+eventBus.SubscribeFunc(events.TimerTick, manejarTickTimer)
+eventBus.SubscribeFunc(events.PomodoroCompleted, manejarPomodoroCompletado)
 
-// Subscribe to all events
-eventBus.SubscribeGlobalFunc(handleAllEvents)
+// Suscribirse a todos los eventos
+eventBus.SubscribeGlobalFunc(manejarTodosLosEventos)
 ```
 
-### Statistics
+### Estadísticas
 
 ```go
 stats := engine.GetStats()
 snapshot := stats.GetSnapshot()
 
-fmt.Printf("Completed: %d pomodoros\n", snapshot.PomodorosCompleted)
-fmt.Printf("Current streak: %d\n", snapshot.CurrentStreak)
-fmt.Printf("Work efficiency: %.1f%%\n", snapshot.WorkEfficiency)
+fmt.Printf("Completados: %d pomodoros\n", snapshot.PomodorosCompleted)
+fmt.Printf("Racha actual: %d\n", snapshot.CurrentStreak)
+fmt.Printf("Eficiencia de trabajo: %.1f%%\n", snapshot.WorkEfficiency)
 ```
 
-## 📖 API Reference
+## 📖 Referencia de API
 
-### Engine Interface
+### Interfaz del Motor
 
 ```go
 type EngineInterface interface {
     Start(ctx context.Context) error
+    StartFirstSession() error
     Stop() error
     Pause() error
     Resume() error
@@ -129,25 +131,25 @@ type EngineInterface interface {
 }
 ```
 
-### Event Types
+### Tipos de Eventos
 
-| Event Type          | Description            | Data Type           |
-| ------------------- | ---------------------- | ------------------- |
-| `TimerStarted`      | Timer begins           | `TimerEventData`    |
-| `TimerTick`         | Every second update    | `TimerEventData`    |
-| `TimerPaused`       | Timer paused           | `TimerEventData`    |
-| `TimerResumed`      | Timer resumed          | `TimerEventData`    |
-| `TimerCompleted`    | Timer finished         | `TimerEventData`    |
-| `TimerSkipped`      | Timer skipped          | `TimerEventData`    |
-| `PomodoroStarted`   | Work session begins    | `PomodoroEventData` |
-| `PomodoroCompleted` | Work session completed | `PomodoroEventData` |
-| `PomodoroSkipped`   | Work session skipped   | `PomodoroEventData` |
-| `BreakStarted`      | Break begins           | `BreakEventData`    |
-| `BreakCompleted`    | Break completed        | `BreakEventData`    |
-| `BreakSkipped`      | Break skipped          | `BreakEventData`    |
-| `StatsUpdated`      | Statistics changed     | `StatsEventData`    |
+| Tipo de Evento      | Descripción                  | Tipo de Datos       |
+| ------------------- | ---------------------------- | ------------------- |
+| `TimerStarted`      | Timer inicia                 | `TimerEventData`    |
+| `TimerTick`         | Actualización cada segundo   | `TimerEventData`    |
+| `TimerPaused`       | Timer pausado                | `TimerEventData`    |
+| `TimerResumed`      | Timer reanudado              | `TimerEventData`    |
+| `TimerCompleted`    | Timer terminado              | `TimerEventData`    |
+| `TimerSkipped`      | Timer saltado                | `TimerEventData`    |
+| `PomodoroStarted`   | Sesión de trabajo inicia     | `PomodoroEventData` |
+| `PomodoroCompleted` | Sesión de trabajo completada | `PomodoroEventData` |
+| `PomodoroSkipped`   | Sesión de trabajo saltada    | `PomodoroEventData` |
+| `BreakStarted`      | Descanso inicia              | `BreakEventData`    |
+| `BreakCompleted`    | Descanso completado          | `BreakEventData`    |
+| `BreakSkipped`      | Descanso saltado             | `BreakEventData`    |
+| `StatsUpdated`      | Estadísticas cambiaron       | `StatsEventData`    |
 
-### Event Data Structures
+### Estructuras de Datos de Eventos
 
 ```go
 type TimerEventData struct {
@@ -173,21 +175,21 @@ type StatsEventData struct {
     BestStreak         int
     TotalWorkTime      time.Duration
     WorkEfficiency     float64
-    // ... more fields
+    // ... más campos
 }
 ```
 
-## 🏗️ Architecture
+## 🏗️ Arquitectura
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                 YOUR APP                        │
+│                 TU APLICACIÓN                   │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐│
-│  │     CLI     │ │     Web     │ │   Desktop   ││
+│  │     CLI     │ │   Discord   │ │     Web     ││
 │  │   Handler   │ │   Handler   │ │   Handler   ││
 │  └─────────────┘ └─────────────┘ └─────────────┘│
 └─────────────────┬───────────────────────────────┘
-                  │ Events & Commands
+                  │ Eventos y Comandos
 ┌─────────────────▼───────────────────────────────┐
 │              POMODORO CORE                      │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐│
@@ -199,28 +201,28 @@ type StatsEventData struct {
 └─────────────────────────────────────────────────┘
 ```
 
-## 🔧 Configuration Options
+## 🔧 Opciones de Configuración
 
 ```go
 type Config struct {
-    WorkDuration      time.Duration  // Work session length
-    ShortBreak        time.Duration  // Short break length
-    LongBreak         time.Duration  // Long break length
-    LongBreakInterval int           // Pomodoros before long break
+    WorkDuration      time.Duration  // Duración de sesión de trabajo
+    ShortBreak        time.Duration  // Duración de descanso corto
+    LongBreak         time.Duration  // Duración de descanso largo
+    LongBreakInterval int           // Pomodoros antes del descanso largo
 }
 ```
 
-**Validation Rules:**
+**Reglas de Validación:**
 
-- Work duration: 1 minute - 2 hours
-- Short break: 1 minute - 30 minutes
-- Long break: 5 minutes - 1 hour
-- Long break interval: 2 - 10 pomodoros
-- Long break must be longer than short break
+- Duración de trabajo: 1 minuto - 2 horas
+- Descanso corto: 1 minuto - 30 minutos
+- Descanso largo: 5 minutos - 1 hora
+- Intervalo de descanso largo: 2 - 10 pomodoros
+- El descanso largo debe ser mayor que el corto
 
-## 📊 Statistics
+## 📊 Estadísticas
 
-The stats package provides comprehensive session tracking:
+El paquete stats proporciona seguimiento completo de sesiones:
 
 ```go
 type StatsSnapshot struct {
@@ -238,26 +240,26 @@ type StatsSnapshot struct {
 }
 ```
 
-**Available Methods:**
+**Métodos Disponibles:**
 
-- `GetSnapshot()` - Current stats snapshot
-- `GetQuickStats()` - Formatted quick display
-- `GetStatsDisplay()` - Full formatted display
-- `ExportJSON()` - Export to JSON
-- `Reset()` - Reset all statistics
+- `GetSnapshot()` - Instantánea actual de estadísticas
+- `GetQuickStats()` - Visualización rápida formateada
+- `GetStatsDisplay()` - Visualización completa formateada
+- `ExportJSON()` - Exportar a JSON
+- `Reset()` - Reiniciar todas las estadísticas
 
 ## 🧪 Testing
 
-Each package is designed to be easily testable:
+Cada paquete está diseñado para ser fácilmente testeable:
 
 ```go
 func TestEngine(t *testing.T) {
     cfg := config.DefaultConfig()
-    cfg.WorkDuration = 1 * time.Second // Fast test
+    cfg.WorkDuration = 1 * time.Second // Test rápido
 
     engine := engine.NewEngine(cfg)
 
-    // Test events
+    // Testear eventos
     var events []events.Event
     engine.GetEventBus().SubscribeGlobalFunc(func(e events.Event) {
         events = append(events, e)
@@ -265,8 +267,9 @@ func TestEngine(t *testing.T) {
 
     ctx := context.Background()
     engine.Start(ctx)
+    engine.StartFirstSession()
 
-    // Wait and verify
+    // Esperar y verificar
     time.Sleep(2 * time.Second)
     assert.Contains(t, eventTypes(events), events.PomodoroStarted)
 }
@@ -274,38 +277,38 @@ func TestEngine(t *testing.T) {
 
 ## 🔄 Thread Safety
 
-All public methods are thread-safe:
+Todos los métodos públicos son thread-safe:
 
-- Multiple goroutines can safely call engine methods
-- Event handlers run in separate goroutines
-- Internal state is protected with mutexes
-- Context cancellation is handled properly
+- Múltiples goroutines pueden llamar métodos del motor de forma segura
+- Los manejadores de eventos se ejecutan en goroutines separadas
+- El estado interno está protegido con mutexes
+- La cancelación de contexto se maneja correctamente
 
-## 📝 Example Implementations
+## 📝 Ejemplos de Implementación
 
-### CLI Handler
+### Manejador CLI
 
 ```go
 type CLIHandler struct {
     engine engine.EngineInterface
-    // UI specific fields
+    // campos específicos de UI
 }
 
 func (h *CLIHandler) Run() {
-    // Subscribe to events
+    // Suscribirse a eventos
     eventBus := h.engine.GetEventBus()
-    eventBus.SubscribeFunc(events.TimerTick, h.updateDisplay)
+    eventBus.SubscribeFunc(events.TimerTick, h.actualizarPantalla)
 
-    // Start engine
+    // Iniciar motor
     ctx := context.Background()
     h.engine.Start(ctx)
 
-    // Handle user input
-    h.handleInput()
+    // Manejar entrada del usuario
+    h.manejarEntrada()
 }
 ```
 
-### Web Handler
+### Manejador Web
 
 ```go
 type WebHandler struct {
@@ -314,39 +317,39 @@ type WebHandler struct {
 }
 
 func (h *WebHandler) Run() {
-    // Subscribe to events and broadcast to websocket clients
+    // Suscribirse a eventos y transmitir a clientes websocket
     eventBus := h.engine.GetEventBus()
-    eventBus.SubscribeGlobalFunc(h.broadcastEvent)
+    eventBus.SubscribeGlobalFunc(h.transmitirEvento)
 
-    // Setup HTTP handlers
-    http.HandleFunc("/ws", h.handleWebSocket)
-    http.HandleFunc("/api/start", h.handleStart)
+    // Configurar manejadores HTTP
+    http.HandleFunc("/ws", h.manejarWebSocket)
+    http.HandleFunc("/api/start", h.manejarInicio)
     // etc...
 }
 ```
 
-## 📦 Installation
+## 📦 Instalación
 
-```bash
+```go
 go get github.com/kubaliski/pomodoro-core
 ```
 
-## 📄 License
+## 🤝 Contribuir
 
-MIT License - see LICENSE file for details.
+1. Fork el repositorio
+2. Crea una rama de característica
+3. Agrega tests para nueva funcionalidad
+4. Asegúrate de que todos los tests pasen
+5. Envía un pull request
 
-## 🤝 Contributing
+## 📄 Licencia
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+Licencia MIT - ver archivo LICENSE para detalles.
 
-## 📚 Documentation
+## 📚 Documentación
 
-For more detailed documentation and examples, visit the [documentation site](https://github.com/kubaliski/pomodoro-core/docs).
+Para documentación más detallada y ejemplos, visita el [sitio de documentación](https://github.com/kubaliski/pomodoro-core/docs).
 
 ---
 
-Made with ❤️ for productivity enthusiasts
+Hecho con ❤️ para entusiastas de la productividad
