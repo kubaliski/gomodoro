@@ -14,14 +14,13 @@ import (
 
 // UserSession representa una sesión de pomodoro para un usuario específico
 type UserSession struct {
-	UserID           string
-	ChannelID        string // Canal donde se ejecutó el comando
-	DMChannelID      string // Canal DM del usuario (cache)
-	Engine           engine.EngineInterface
-	Config           *config.Config
-	StartTime        time.Time
-	Active           bool
-	NotificationMode string // "dm", "channel", "both" (default: "dm")
+	UserID      string
+	ChannelID   string // Canal donde se ejecutó el comando
+	DMChannelID string // Canal DM del usuario (cache) - OPCIONAL
+	Engine      engine.EngineInterface
+	Config      *config.Config
+	StartTime   time.Time
+	Active      bool
 }
 
 // SessionManager maneja múltiples sesiones de usuarios
@@ -65,16 +64,15 @@ func (sm *SessionManager) StartSession(userID, channelID string, customConfig *c
 	// Crear nueva engine
 	pomodoroEngine := engine.NewEngine(cfg.Clone())
 
-	// Crear sesión con modo DM por defecto
+	// Crear sesión
 	session := &UserSession{
-		UserID:           userID,
-		ChannelID:        channelID,
-		DMChannelID:      "", // Se establecerá cuando sea necesario
-		Engine:           pomodoroEngine,
-		Config:           cfg.Clone(),
-		StartTime:        time.Now(),
-		Active:           true,
-		NotificationMode: "dm", // Valor por defecto
+		UserID:      userID,
+		ChannelID:   channelID,
+		DMChannelID: "", // Se establecerá cuando sea necesario por el NotificationManager
+		Engine:      pomodoroEngine,
+		Config:      cfg.Clone(),
+		StartTime:   time.Now(),
+		Active:      true,
 	}
 
 	// Configurar event handlers para esta sesión ANTES de iniciar el engine
@@ -133,7 +131,7 @@ func (sm *SessionManager) GetSession(userID string) (*UserSession, error) {
 	return session, nil
 }
 
-// UpdateSessionDMChannel actualiza el canal DM de una sesión
+// UpdateSessionDMChannel actualiza el canal DM de una sesión (usado por NotificationManager)
 func (sm *SessionManager) UpdateSessionDMChannel(userID, dmChannelID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -144,27 +142,7 @@ func (sm *SessionManager) UpdateSessionDMChannel(userID, dmChannelID string) err
 	}
 
 	session.DMChannelID = dmChannelID
-	log.Printf("📱 Updated DM channel for user %s: %s", userID, dmChannelID)
-	return nil
-}
-
-// UpdateSessionNotificationMode actualiza el modo de notificación de una sesión
-func (sm *SessionManager) UpdateSessionNotificationMode(userID, mode string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[userID]
-	if !exists || !session.Active {
-		return fmt.Errorf("no active session found for user")
-	}
-
-	// Validar modo
-	if mode != "dm" && mode != "channel" && mode != "both" {
-		return fmt.Errorf("invalid notification mode: %s", mode)
-	}
-
-	session.NotificationMode = mode
-	log.Printf("🔔 Updated notification mode for user %s: %s", userID, mode)
+	log.Printf("📱 Updated DM channel cache for user %s", userID)
 	return nil
 }
 
@@ -270,10 +248,6 @@ func (sm *SessionManager) setupSessionEventHandlers(session *UserSession) {
 	eventBus.SubscribeFunc(events.TimerTick, func(event events.Event) {
 		if data, ok := event.Data.(events.TimerEventData); ok {
 			currentMinute := int(data.Remaining.Minutes())
-			// Debug: imprimir cada tick
-			if currentMinute%5 == 0 || currentMinute <= 5 {
-				log.Printf("⏰ Timer tick for user %s: %d minutes remaining", session.UserID, currentMinute)
-			}
 
 			// Notificar en minutos específicos: 10, 5, 1
 			if (currentMinute == 10 || currentMinute == 5 || currentMinute == 1) && currentMinute != lastNotified {
@@ -331,4 +305,19 @@ func (sm *SessionManager) CleanupInactiveSessions() {
 	if cleanedCount > 0 {
 		log.Printf("🧹 Cleaned up %d inactive sessions", cleanedCount)
 	}
+}
+
+// GetActiveSessionCount retorna el número de sesiones activas
+func (sm *SessionManager) GetActiveSessionCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	count := 0
+	for _, session := range sm.sessions {
+		if session.Active {
+			count++
+		}
+	}
+
+	return count
 }
