@@ -77,7 +77,7 @@ func (b *Bot) setupHandlers() {
 
 	// Handler para cuando el bot se conecta
 	b.session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
-		log.Printf("Bot is ready! Logged in as: %v#%v", r.User.Username, r.User.Discriminator)
+		log.Printf("✅ Bot is ready! Logged in as: %v#%v", r.User.Username, r.User.Discriminator)
 	})
 
 	// Registrar handlers de eventos de pomodoro
@@ -222,12 +222,16 @@ func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.Interaction
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+
+	if err != nil {
+		log.Printf("Error responding to interaction: %v", err)
+	}
 }
 
 // handleStopPomodoro maneja el comando de detener pomodoro
@@ -257,109 +261,154 @@ func (b *Bot) handleStopPomodoro(s *discordgo.Session, i *discordgo.InteractionC
 // Event handlers para notificaciones de pomodoro
 
 func (b *Bot) handlePomodoroCompleted(userID, channelID string, event events.Event) {
-	if data, ok := event.Data.(events.PomodoroEventData); ok {
-		embed := &discordgo.MessageEmbed{
-			Title:       "🎉 ¡Pomodoro Completado!",
-			Description: fmt.Sprintf("¡Excelente trabajo! Has completado el pomodoro #%d", data.Number),
-			Color:       0x00ff00,
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Duración", Value: config.FormatDuration(data.Duration), Inline: true},
-				{Name: "Tiempo Real", Value: config.FormatDuration(data.ActualTime), Inline: true},
-			},
-			Timestamp: time.Now().Format(time.RFC3339),
-		}
+	data, ok := event.Data.(events.PomodoroEventData)
+	if !ok {
+		log.Printf("Invalid event data type for PomodoroCompleted")
+		return
+	}
 
-		b.session.ChannelMessageSendEmbed(channelID, embed)
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎉 ¡Pomodoro Completado!",
+		Description: fmt.Sprintf("¡Excelente trabajo! Has completado el pomodoro #%d", data.Number),
+		Color:       0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Duración", Value: config.FormatDuration(data.Duration), Inline: true},
+			{Name: "Tiempo Real", Value: config.FormatDuration(data.ActualTime), Inline: true},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
 
-		// Mention user
-		b.session.ChannelMessageSend(channelID, fmt.Sprintf("<@%s> ¡Hora de un descanso! 🧘‍♂️", userID))
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error sending pomodoro completed notification: %v", err)
+		return
+	}
+
+	// Mention user
+	mentionMsg := fmt.Sprintf("<@%s> ¡Hora de un descanso! 🧘‍♂️", userID)
+	_, err = b.session.ChannelMessageSend(channelID, mentionMsg)
+	if err != nil {
+		log.Printf("Error sending mention message: %v", err)
 	}
 }
 
 func (b *Bot) handleBreakStarted(userID, channelID string, event events.Event) {
-	if data, ok := event.Data.(events.BreakEventData); ok {
-		breakType := "Descanso Corto"
-		emoji := "☕"
-		if data.IsLongBreak {
-			breakType = "Descanso Largo"
-			emoji = "🏖️"
-		}
+	data, ok := event.Data.(events.BreakEventData)
+	if !ok {
+		log.Printf("Invalid event data type for BreakStarted")
+		return
+	}
 
-		embed := &discordgo.MessageEmbed{
-			Title:       fmt.Sprintf("%s %s Iniciado", emoji, breakType),
-			Description: fmt.Sprintf("Hora de relajarse por %s", config.FormatDuration(data.Duration)),
-			Color:       0x0099ff,
-			Timestamp:   time.Now().Format(time.RFC3339),
-		}
+	breakType := "Descanso Corto"
+	emoji := "☕"
+	if data.IsLongBreak {
+		breakType = "Descanso Largo"
+		emoji = "🏖️"
+	}
 
-		b.session.ChannelMessageSendEmbed(channelID, embed)
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("%s %s Iniciado", emoji, breakType),
+		Description: fmt.Sprintf("Hora de relajarse por %s", config.FormatDuration(data.Duration)),
+		Color:       0x0099ff,
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error sending break started notification: %v", err)
 	}
 }
 
 func (b *Bot) handlePomodoroStarted(userID, channelID string, event events.Event) {
-	if data, ok := event.Data.(events.PomodoroEventData); ok {
-		embed := &discordgo.MessageEmbed{
-			Title:       "🍅 ¡Hora de Concentrarse!",
-			Description: fmt.Sprintf("Pomodoro #%d iniciado - ¡hora de enfocarse!", data.Number),
-			Color:       0xff6b6b,
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Duración", Value: config.FormatDuration(data.Duration), Inline: true},
-				{Name: "Iniciado", Value: data.StartTime.Format("15:04:05"), Inline: true},
-			},
-			Timestamp: time.Now().Format(time.RFC3339),
-		}
+	data, ok := event.Data.(events.PomodoroEventData)
+	if !ok {
+		log.Printf("Invalid event data type for PomodoroStarted")
+		return
+	}
 
-		b.session.ChannelMessageSendEmbed(channelID, embed)
+	embed := &discordgo.MessageEmbed{
+		Title:       "🍅 ¡Hora de Concentrarse!",
+		Description: fmt.Sprintf("Pomodoro #%d iniciado - ¡hora de enfocarse!", data.Number),
+		Color:       0xff6b6b,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Duración", Value: config.FormatDuration(data.Duration), Inline: true},
+			{Name: "Iniciado", Value: data.StartTime.Format("15:04:05"), Inline: true},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error sending pomodoro started notification: %v", err)
 	}
 }
 
 func (b *Bot) handleBreakCompleted(userID, channelID string, event events.Event) {
-	if data, ok := event.Data.(events.BreakEventData); ok {
-		embed := &discordgo.MessageEmbed{
-			Title:       "⏰ ¡Descanso Completado!",
-			Description: "El tiempo de descanso ha terminado. ¿Listo para volver al trabajo?",
-			Color:       0xffa500,
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Tipo de Descanso", Value: translateBreakType(data.Type), Inline: true},
-				{Name: "Duración", Value: config.FormatDuration(data.ActualTime), Inline: true},
-			},
-			Timestamp: time.Now().Format(time.RFC3339),
-		}
+	data, ok := event.Data.(events.BreakEventData)
+	if !ok {
+		log.Printf("Invalid event data type for BreakCompleted")
+		return
+	}
 
-		b.session.ChannelMessageSendEmbed(channelID, embed)
-		b.session.ChannelMessageSend(channelID, fmt.Sprintf("<@%s> ¡De vuelta al trabajo! 💪", userID))
+	embed := &discordgo.MessageEmbed{
+		Title:       "⏰ ¡Descanso Completado!",
+		Description: "El tiempo de descanso ha terminado. ¿Listo para volver al trabajo?",
+		Color:       0xffa500,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Tipo de Descanso", Value: translateBreakType(data.Type), Inline: true},
+			{Name: "Duración", Value: config.FormatDuration(data.ActualTime), Inline: true},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error sending break completed notification: %v", err)
+		return
+	}
+
+	mentionMsg := fmt.Sprintf("<@%s> ¡De vuelta al trabajo! 💪", userID)
+	_, err = b.session.ChannelMessageSend(channelID, mentionMsg)
+	if err != nil {
+		log.Printf("Error sending back to work message: %v", err)
 	}
 }
 
 func (b *Bot) handleTimerReminder(userID, channelID string, event events.Event) {
-	if data, ok := event.Data.(events.TimerEventData); ok {
-		remaining := int(data.Remaining.Minutes())
+	data, ok := event.Data.(events.TimerEventData)
+	if !ok {
+		return
+	}
 
-		var message string
-		var color int
+	remaining := int(data.Remaining.Minutes())
 
-		switch remaining {
-		case 10:
-			message = "Quedan 10 minutos"
-			color = 0xffaa00
-		case 5:
-			message = "Quedan 5 minutos"
-			color = 0xff6600
-		case 1:
-			message = "¡Queda 1 minuto!"
-			color = 0xff0000
-		default:
-			return
-		}
+	var message string
+	var color int
 
-		embed := &discordgo.MessageEmbed{
-			Title:       "⏰ Recordatorio de Tiempo",
-			Description: message,
-			Color:       color,
-			Timestamp:   time.Now().Format(time.RFC3339),
-		}
+	switch remaining {
+	case 10:
+		message = "Quedan 10 minutos"
+		color = 0xffaa00
+	case 5:
+		message = "Quedan 5 minutos"
+		color = 0xff6600
+	case 1:
+		message = "¡Queda 1 minuto!"
+		color = 0xff0000
+	default:
+		return // No reminder needed
+	}
 
-		b.session.ChannelMessageSendEmbed(channelID, embed)
+	embed := &discordgo.MessageEmbed{
+		Title:       "⏰ Recordatorio de Tiempo",
+		Description: message,
+		Color:       color,
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+
+	_, err := b.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error sending timer reminder: %v", err)
 	}
 }
 

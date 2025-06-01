@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -57,6 +58,8 @@ func (sm *SessionManager) StartSession(userID, channelID string, customConfig *c
 		cfg = customConfig
 	}
 
+	log.Printf("🚀 Starting new session for user %s with config: %s", userID, cfg.String())
+
 	// Crear nueva engine
 	pomodoroEngine := engine.NewEngine(cfg.Clone())
 
@@ -70,7 +73,7 @@ func (sm *SessionManager) StartSession(userID, channelID string, customConfig *c
 		Active:    true,
 	}
 
-	// Configurar event handlers para esta sesión
+	// Configurar event handlers para esta sesión ANTES de iniciar el engine
 	sm.setupSessionEventHandlers(session)
 
 	// Iniciar engine
@@ -79,11 +82,15 @@ func (sm *SessionManager) StartSession(userID, channelID string, customConfig *c
 		return nil, fmt.Errorf("failed to start pomodoro engine: %w", err)
 	}
 
-	// Iniciar primera sesión
+	log.Printf("✅ Engine started successfully for user %s", userID)
+
+	// ✅ CRÍTICO: Iniciar primera sesión automáticamente
 	if err := session.Engine.StartFirstSession(); err != nil {
 		session.Engine.Stop()
 		return nil, fmt.Errorf("failed to start first session: %w", err)
 	}
+
+	log.Printf("✅ First session started successfully for user %s", userID)
 
 	// Guardar sesión
 	sm.sessions[userID] = session
@@ -101,6 +108,7 @@ func (sm *SessionManager) StopSession(userID string) error {
 		return fmt.Errorf("no active session found for user")
 	}
 
+	log.Printf("🛑 Stopping session for user %s", userID)
 	session.Engine.Stop()
 	session.Active = false
 	delete(sm.sessions, userID)
@@ -142,6 +150,7 @@ func (sm *SessionManager) PauseSession(userID string) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("⏸️ Pausing session for user %s", userID)
 	return session.Engine.Pause()
 }
 
@@ -151,6 +160,7 @@ func (sm *SessionManager) ResumeSession(userID string) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("▶️ Resuming session for user %s", userID)
 	return session.Engine.Resume()
 }
 
@@ -160,11 +170,13 @@ func (sm *SessionManager) SkipSession(userID string) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("⏭️ Skipping session for user %s", userID)
 	return session.Engine.Skip()
 }
 
 // RegisterEventHandler registra un handler para eventos de Discord
 func (sm *SessionManager) RegisterEventHandler(eventType string, handler EventHandlerFunc) {
+	log.Printf("📝 Registering event handler for: %s", eventType)
 	sm.eventHandlers[eventType] = handler
 }
 
@@ -172,48 +184,84 @@ func (sm *SessionManager) RegisterEventHandler(eventType string, handler EventHa
 func (sm *SessionManager) setupSessionEventHandlers(session *UserSession) {
 	eventBus := session.Engine.GetEventBus()
 
+	log.Printf("🔧 Setting up event handlers for user %s", session.UserID)
+
 	// Handler para eventos de pomodoro completado
 	eventBus.SubscribeFunc(events.PomodoroCompleted, func(event events.Event) {
+		log.Printf("🍅 PomodoroCompleted event received for user %s", session.UserID)
 		if handler, exists := sm.eventHandlers["pomodoro_completed"]; exists {
 			handler(session.UserID, session.ChannelID, event)
+		} else {
+			log.Printf("❌ No handler registered for pomodoro_completed")
 		}
 	})
 
 	// Handler para eventos de break completado
 	eventBus.SubscribeFunc(events.BreakCompleted, func(event events.Event) {
+		log.Printf("☕ BreakCompleted event received for user %s", session.UserID)
 		if handler, exists := sm.eventHandlers["break_completed"]; exists {
 			handler(session.UserID, session.ChannelID, event)
+		} else {
+			log.Printf("❌ No handler registered for break_completed")
 		}
 	})
 
 	// Handler para eventos de pomodoro iniciado
 	eventBus.SubscribeFunc(events.PomodoroStarted, func(event events.Event) {
+		log.Printf("🍅 PomodoroStarted event received for user %s", session.UserID)
 		if handler, exists := sm.eventHandlers["pomodoro_started"]; exists {
 			handler(session.UserID, session.ChannelID, event)
+		} else {
+			log.Printf("❌ No handler registered for pomodoro_started")
 		}
 	})
 
 	// Handler para eventos de break iniciado
 	eventBus.SubscribeFunc(events.BreakStarted, func(event events.Event) {
+		log.Printf("☕ BreakStarted event received for user %s", session.UserID)
 		if handler, exists := sm.eventHandlers["break_started"]; exists {
 			handler(session.UserID, session.ChannelID, event)
+		} else {
+			log.Printf("❌ No handler registered for break_started")
 		}
 	})
 
-	// Handler para eventos de tick (notificar cada 5 minutos)
+	// Handler para eventos de tick (notificar cada minuto específico)
 	lastNotified := -1
 	eventBus.SubscribeFunc(events.TimerTick, func(event events.Event) {
 		if data, ok := event.Data.(events.TimerEventData); ok {
 			currentMinute := int(data.Remaining.Minutes())
+			// Debug: imprimir cada tick
+			if currentMinute%5 == 0 || currentMinute <= 5 {
+				log.Printf("⏰ Timer tick for user %s: %d minutes remaining", session.UserID, currentMinute)
+			}
+
 			// Notificar en minutos específicos: 10, 5, 1
 			if (currentMinute == 10 || currentMinute == 5 || currentMinute == 1) && currentMinute != lastNotified {
 				lastNotified = currentMinute
+				log.Printf("⏰ TimerReminder triggered for user %s: %d minutes remaining", session.UserID, currentMinute)
 				if handler, exists := sm.eventHandlers["timer_reminder"]; exists {
 					handler(session.UserID, session.ChannelID, event)
+				} else {
+					log.Printf("❌ No handler registered for timer_reminder")
 				}
 			}
 		}
 	})
+
+	// Handler para cuando el timer se completa
+	eventBus.SubscribeFunc(events.TimerCompleted, func(event events.Event) {
+		log.Printf("⏰ TimerCompleted event received for user %s", session.UserID)
+	})
+
+	// Handler para errores
+	eventBus.SubscribeFunc(events.ErrorOccurred, func(event events.Event) {
+		if data, ok := event.Data.(events.ErrorEventData); ok {
+			log.Printf("❌ Error in session for user %s: %s - %s", session.UserID, data.Code, data.Message)
+		}
+	})
+
+	log.Printf("✅ Event handlers configured for user %s (registered %d handler types)", session.UserID, len(sm.eventHandlers))
 }
 
 // GetSessionStats obtiene las estadísticas de la sesión de un usuario
@@ -231,10 +279,17 @@ func (sm *SessionManager) CleanupInactiveSessions() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	cleanedCount := 0
 	for userID, session := range sm.sessions {
 		if !session.Active || !session.Engine.IsRunning() {
+			log.Printf("🧹 Cleaning up inactive session for user %s", userID)
 			session.Engine.Stop()
 			delete(sm.sessions, userID)
+			cleanedCount++
 		}
+	}
+
+	if cleanedCount > 0 {
+		log.Printf("🧹 Cleaned up %d inactive sessions", cleanedCount)
 	}
 }
