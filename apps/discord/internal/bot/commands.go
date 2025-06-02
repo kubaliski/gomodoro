@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -9,12 +10,125 @@ import (
 	"github.com/kubaliski/pomodoro-core/stats"
 )
 
+// handleStartPomodoro maneja el comando de iniciar pomodoro
+func (b *Bot) handleStartPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
+
+	channelID := i.ChannelID
+
+	// Parsear opciones personalizadas
+	cfg := config.DefaultConfig()
+	options := i.ApplicationCommandData().Options
+
+	for _, option := range options {
+		switch option.Name {
+		case "work":
+			cfg.WorkDuration = time.Duration(option.IntValue()) * time.Minute
+		case "short_break":
+			cfg.ShortBreak = time.Duration(option.IntValue()) * time.Minute
+		case "long_break":
+			cfg.LongBreak = time.Duration(option.IntValue()) * time.Minute
+		}
+	}
+
+	// Validar configuración
+	if err := cfg.Validate(); err != nil {
+		respondWithError(s, i, fmt.Sprintf("Configuración inválida: %v", err))
+		return
+	}
+
+	// Iniciar sesión
+	session, err := b.sessionManager.StartSession(userID, channelID, cfg)
+	if err != nil {
+		respondWithError(s, i, fmt.Sprintf("Error al iniciar pomodoro: %v", err))
+		return
+	}
+
+	// Crear respuesta pública en el canal
+	embed := &discordgo.MessageEmbed{
+		Title: "🍅 ¡Pomodoro Iniciado!",
+		Description: fmt.Sprintf("Tu sesión comenzó con períodos de trabajo de %s.\n\n📱 **Las notificaciones se envían a tus mensajes privados**",
+			config.FormatDuration(session.Config.WorkDuration)),
+		Color: 0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name: "⚙️ Configuración",
+				Value: fmt.Sprintf("**Trabajo:** %s\n**Descanso Corto:** %s\n**Descanso Largo:** %s",
+					config.FormatDuration(session.Config.WorkDuration),
+					config.FormatDuration(session.Config.ShortBreak),
+					config.FormatDuration(session.Config.LongBreak)),
+				Inline: false,
+			},
+			{
+				Name:   "💡 Consejo",
+				Value:  "Revisa tus mensajes privados para recibir todas las notificaciones",
+				Inline: false,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Asegúrate de tener los DMs habilitados para la mejor experiencia",
+		},
+	}
+
+	// Responder en el canal público
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+
+	if err != nil {
+		log.Printf("❌ Error responding to start command: %v", err)
+	}
+}
+
+// handleStopPomodoro maneja el comando de detener pomodoro
+func (b *Bot) handleStopPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
+
+	if err := b.sessionManager.StopSession(userID); err != nil {
+		respondWithError(s, i, fmt.Sprintf("Error al detener el pomodoro: %v", err))
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "⏹️ Pomodoro Detenido",
+		Description: "Tu sesión de pomodoro ha sido detenida exitosamente.",
+		Color:       0xff0000,
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Usa /pomodoro para iniciar una nueva sesión",
+		},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
 // handlePausePomodoro maneja el comando de pausar pomodoro
 func (b *Bot) handlePausePomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.PauseSession(userID); err != nil {
-		b.respondWithError(s, i, fmt.Sprintf("Error al pausar el pomodoro: %v", err))
+		respondWithError(s, i, fmt.Sprintf("Error al pausar el pomodoro: %v", err))
 		return
 	}
 
@@ -35,10 +149,14 @@ func (b *Bot) handlePausePomodoro(s *discordgo.Session, i *discordgo.Interaction
 
 // handleResumePomodoro maneja el comando de reanudar pomodoro
 func (b *Bot) handleResumePomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.ResumeSession(userID); err != nil {
-		b.respondWithError(s, i, fmt.Sprintf("Error al reanudar el pomodoro: %v", err))
+		respondWithError(s, i, fmt.Sprintf("Error al reanudar el pomodoro: %v", err))
 		return
 	}
 
@@ -59,16 +177,20 @@ func (b *Bot) handleResumePomodoro(s *discordgo.Session, i *discordgo.Interactio
 
 // handleSkipPomodoro maneja el comando de saltar sesión
 func (b *Bot) handleSkipPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
 
 	if err := b.sessionManager.SkipSession(userID); err != nil {
-		b.respondWithError(s, i, fmt.Sprintf("Error al saltar la sesión: %v", err))
+		respondWithError(s, i, fmt.Sprintf("Error al saltar la sesión: %v", err))
 		return
 	}
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "⏭️ Sesión Saltada",
-		Description: "La sesión actual ha sido saltada. Continuando con la siguiente sesión.",
+		Description: "La sesión actual ha sido saltada. Continuando con la siguiente.",
 		Color:       0xffaa00,
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
@@ -83,11 +205,15 @@ func (b *Bot) handleSkipPomodoro(s *discordgo.Session, i *discordgo.InteractionC
 
 // handleStatusPomodoro maneja el comando de estado
 func (b *Bot) handleStatusPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
 
 	session, err := b.sessionManager.GetSession(userID)
 	if err != nil {
-		b.respondWithError(s, i, "No tienes una sesión de pomodoro activa. Usa `/pomodoro` para iniciar una.")
+		respondWithError(s, i, "No tienes una sesión de pomodoro activa. Usa `/pomodoro` para iniciar una.")
 		return
 	}
 
@@ -134,7 +260,7 @@ func (b *Bot) handleStatusPomodoro(s *discordgo.Session, i *discordgo.Interactio
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Estado", Value: translateState(stateStr), Inline: true},
 			{Name: "Sesión Iniciada", Value: session.StartTime.Format("15:04:05"), Inline: true},
-			{Name: "Configuración", Value: fmt.Sprintf("Trabajo: %s | Descanso Corto: %s | Descanso Largo: %s",
+			{Name: "Configuración", Value: fmt.Sprintf("**Trabajo:** %s\n**Descanso Corto:** %s\n**Descanso Largo:** %s",
 				config.FormatDuration(session.Config.WorkDuration),
 				config.FormatDuration(session.Config.ShortBreak),
 				config.FormatDuration(session.Config.LongBreak)), Inline: false},
@@ -155,18 +281,22 @@ func (b *Bot) handleStatusPomodoro(s *discordgo.Session, i *discordgo.Interactio
 
 // handleStatsPomodoro maneja el comando de estadísticas
 func (b *Bot) handleStatsPomodoro(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
+	userID, err := getUserID(i)
+	if err != nil {
+		respondWithError(s, i, err.Error())
+		return
+	}
 
 	session, err := b.sessionManager.GetSession(userID)
 	if err != nil {
-		b.respondWithError(s, i, "No tienes una sesión de pomodoro activa. Usa `/pomodoro` para iniciar una.")
+		respondWithError(s, i, "No tienes una sesión de pomodoro activa. Usa `/pomodoro` para iniciar una.")
 		return
 	}
 
 	statsData := session.Engine.GetStats().GetSnapshot()
 
 	// Crear barra de progreso visual para eficiencia
-	efficiencyBar := b.createProgressBar(statsData.WorkEfficiency, 20)
+	efficiencyBar := createProgressBar(statsData.WorkEfficiency, 20)
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "📊 Estadísticas de Pomodoro",
@@ -175,22 +305,22 @@ func (b *Bot) handleStatsPomodoro(s *discordgo.Session, i *discordgo.Interaction
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "🍅 Pomodoros",
-				Value:  fmt.Sprintf("Completados: %d\nSaltados: %d", statsData.PomodorosCompleted, statsData.PomodorosSkipped),
+				Value:  fmt.Sprintf("**Completados:** %d\n**Saltados:** %d", statsData.PomodorosCompleted, statsData.PomodorosSkipped),
 				Inline: true,
 			},
 			{
 				Name:   "☕ Descansos",
-				Value:  fmt.Sprintf("Completados: %d\nSaltados: %d\nDescansos Largos: %d", statsData.BreaksCompleted, statsData.BreaksSkipped, statsData.LongBreaksCompleted),
+				Value:  fmt.Sprintf("**Completados:** %d\n**Saltados:** %d\n**Largos:** %d", statsData.BreaksCompleted, statsData.BreaksSkipped, statsData.LongBreaksCompleted),
 				Inline: true,
 			},
 			{
 				Name:   "🔥 Rachas",
-				Value:  fmt.Sprintf("Actual: %d\nMejor: %d", statsData.CurrentStreak, statsData.BestStreak),
+				Value:  fmt.Sprintf("**Actual:** %d\n**Mejor:** %d", statsData.CurrentStreak, statsData.BestStreak),
 				Inline: true,
 			},
 			{
 				Name: "⏱️ Tiempo Dedicado",
-				Value: fmt.Sprintf("Trabajo: %s\nDescansos: %s\nTotal: %s",
+				Value: fmt.Sprintf("**Trabajo:** %s\n**Descansos:** %s\n**Total:** %s",
 					stats.FormatDuration(statsData.TotalWorkTime),
 					stats.FormatDuration(statsData.TotalBreakTime),
 					stats.FormatDuration(statsData.SessionDuration)),
@@ -198,12 +328,12 @@ func (b *Bot) handleStatsPomodoro(s *discordgo.Session, i *discordgo.Interaction
 			},
 			{
 				Name:   "📈 Eficiencia",
-				Value:  fmt.Sprintf("%.1f%%\n[%s]", statsData.WorkEfficiency, efficiencyBar),
+				Value:  fmt.Sprintf("**%.1f%%**\n`[%s]`", statsData.WorkEfficiency, efficiencyBar),
 				Inline: true,
 			},
 			{
 				Name: "📋 Info de Sesión",
-				Value: fmt.Sprintf("Total de Sesiones: %d\nIniciado: %s",
+				Value: fmt.Sprintf("**Total de Sesiones:** %d\n**Iniciado:** %s",
 					statsData.TotalSessions,
 					session.StartTime.Format("15:04 del 2 Jan")),
 				Inline: true,
@@ -221,52 +351,4 @@ func (b *Bot) handleStatsPomodoro(s *discordgo.Session, i *discordgo.Interaction
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
-}
-
-// translateState traduce el estado del engine al español
-func translateState(state string) string {
-	switch state {
-	case "running":
-		return "ejecutando"
-	case "paused":
-		return "pausado"
-	case "stopped":
-		return "detenido"
-	case "idle":
-		return "inactivo"
-	default:
-		return state
-	}
-}
-
-// createProgressBar crea una barra de progreso visual
-func (b *Bot) createProgressBar(percentage float64, width int) string {
-	if width <= 0 {
-		width = 20
-	}
-
-	filled := int(percentage / 100 * float64(width))
-	if filled > width {
-		filled = width
-	}
-	if filled < 0 {
-		filled = 0
-	}
-
-	var bar string
-	for i := 0; i < width; i++ {
-		if i < filled {
-			if percentage >= 80 {
-				bar += "█" // Verde para alta eficiencia
-			} else if percentage >= 60 {
-				bar += "▓" // Amarillo para eficiencia media
-			} else {
-				bar += "▒" // Rojo para baja eficiencia
-			}
-		} else {
-			bar += "░"
-		}
-	}
-
-	return bar
 }
