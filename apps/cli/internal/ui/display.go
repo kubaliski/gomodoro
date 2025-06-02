@@ -117,7 +117,7 @@ func DisplayTimer(remaining time.Duration, state string, args ...interface{}) {
 		ClearScreen()
 		fmt.Print(Colorize("+================================+", ColorCyan, true))
 		fmt.Println()
-		fmt.Print(Colorize("|          POMODORO CLI          |", ColorCyan, true))
+		fmt.Print(Colorize("|          GOMODORO CLI          |", ColorCyan, true))
 		fmt.Println()
 		fmt.Print(Colorize("+================================+", ColorCyan, true))
 		fmt.Println()
