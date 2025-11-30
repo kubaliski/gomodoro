@@ -1,0 +1,74 @@
+# Configuración de golangci-lint para Pomodoro Core
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  go: "1.21"
+
+linters:
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - typecheck
+    - unused
+    - gosimple
+    - gocritic
+    - revive
+    - gosec
+    - unconvert
+    - unparam
+    - misspell
+    - prealloc
+    - exportloopref
+    - nolintlint
+
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+    disabled-checks:
+      - unnecessaryDefer
+      - dupImport
+
+  revive:
+    rules:
+      - name: var-naming
+        disabled: true # Permitir nombres cortos en tests
+      - name: exported
+        disabled: false
+
+  gosec:
+    excludes:
+      - G104 # Permitir ignorar errores en tests
+      - G601 # Permitir referencias en loops en tests
+
+issues:
+  exclude-rules:
+    # Permitir más flexibilidad en archivos de test
+    - path: _test\.go
+      linters:
+        - gosec
+        - revive
+        - gocritic
+        - unparam
+
+    # Permitir nombres cortos en testhelpers
+    - path: testhelpers/
+      linters:
+        - revive
+        - stylecheck
+
+    # Ignorar algunos issues en examples o fixtures
+    - path: fixtures\.go
+      linters:
+        - gosec
+        - revive
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
